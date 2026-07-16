@@ -235,22 +235,26 @@ def fetch_hr_drift(detail):
     return None
 
 def fetch_activities(client, date_str):
+    """Fetch running activities only — walks and other types are skipped."""
     activities = []
     try:
         raw = client.get_activities_by_date(date_str, date_str)
         for a in raw:
+            type_key = a.get("activityType", {}).get("typeKey", "")
+            is_run   = "run" in type_key.lower()
+
+            # Skip non-running activities entirely
+            if not is_run:
+                continue
+
             activity_id = a.get("activityId")
             distance_m  = a.get("distance", 0) or 0
             duration_s  = a.get("duration", 0) or 0
             avg_speed   = a.get("averageSpeed", 0) or 0
-            type_key    = a.get("activityType", {}).get("typeKey", "")
-            is_run      = "run" in type_key.lower()
-
-            pace_decimal = round(1 / (avg_speed * 60 / 1000), 2) if (is_run and avg_speed > 0) else None
+            pace_decimal = round(1 / (avg_speed * 60 / 1000), 2) if avg_speed > 0 else None
 
             detail   = {}
             hr_zones = {f"zone_{i}_mins": None for i in range(1, 6)}
-            weather  = {"temp_c": None, "humidity_pct": None, "wind_kph": None, "weather_desc": ""}
 
             if activity_id:
                 try:
@@ -272,7 +276,7 @@ def fetch_activities(client, date_str):
 
             weather = fetch_weather(lat, lon, date_str, act_hour)
 
-            # Splits
+            # Splits — runs only
             splits = []
             if activity_id:
                 try:
@@ -298,14 +302,14 @@ def fetch_activities(client, date_str):
                     print(f"    Splits failed {activity_id}: {e}")
 
             activities.append({
-                "activity_id":    activity_id,
-                "name":           a.get("activityName", ""),
-                "type":           type_key,
-                "distance_km":    round(distance_m / 1000, 2) if distance_m else None,
-                "duration":       decimal_mins_to_mmss(round(duration_s / 60, 2)) if duration_s else None,
-                "avg_hr":         a.get("averageHR"),
-                "max_hr":         a.get("maxHR"),
-                "avg_pace_min_km": decimal_mins_to_mmss(pace_decimal),
+                "activity_id":      activity_id,
+                "name":             a.get("activityName", ""),
+                "type":             type_key,
+                "distance_km":      round(distance_m / 1000, 2) if distance_m else None,
+                "duration":         decimal_mins_to_mmss(round(duration_s / 60, 2)) if duration_s else None,
+                "avg_hr":           a.get("averageHR"),
+                "max_hr":           a.get("maxHR"),
+                "avg_pace_min_km":  decimal_mins_to_mmss(pace_decimal),
                 "elevation_gain_m": a.get("elevationGain"),
                 "training_effect":  a.get("aerobicTrainingEffect"),
                 "vo2max":           a.get("vO2MaxValue"),
