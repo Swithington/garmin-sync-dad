@@ -235,17 +235,13 @@ def fetch_hr_drift(detail):
     return None
 
 def fetch_activities(client, date_str):
-    """Fetch running activities only — walks and other types are skipped."""
+    """Fetch all activities. Splits only fetched for runs; walks/cycling get headline data only."""
     activities = []
     try:
         raw = client.get_activities_by_date(date_str, date_str)
         for a in raw:
             type_key = a.get("activityType", {}).get("typeKey", "")
             is_run   = "run" in type_key.lower()
-
-            # Skip non-running activities entirely
-            if not is_run:
-                continue
 
             activity_id = a.get("activityId")
             distance_m  = a.get("distance", 0) or 0
@@ -256,7 +252,8 @@ def fetch_activities(client, date_str):
             detail   = {}
             hr_zones = {f"zone_{i}_mins": None for i in range(1, 6)}
 
-            if activity_id:
+            # Only fetch full detail, HR zones and weather for runs
+            if activity_id and is_run:
                 try:
                     detail = client.get_activity(activity_id)
                 except Exception:
@@ -265,20 +262,21 @@ def fetch_activities(client, date_str):
 
             calories = detail.get("calories") or detail.get("activeKilocalories") or a.get("calories")
 
-            summary  = detail.get("summaryDTO", {})
-            lat      = summary.get("startLatitude") or a.get("startLatitude")
-            lon      = summary.get("startLongitude") or a.get("startLongitude")
-            start_dt = summary.get("startTimeLocal", "")
-            try:
-                act_hour = int(start_dt[11:13]) if len(start_dt) >= 13 else 12
-            except (ValueError, IndexError):
-                act_hour = 12
+            weather = {"temp_c": None, "humidity_pct": None, "wind_kph": None, "weather_desc": ""}
+            if is_run:
+                summary  = detail.get("summaryDTO", {})
+                lat      = summary.get("startLatitude") or a.get("startLatitude")
+                lon      = summary.get("startLongitude") or a.get("startLongitude")
+                start_dt = summary.get("startTimeLocal", "")
+                try:
+                    act_hour = int(start_dt[11:13]) if len(start_dt) >= 13 else 12
+                except (ValueError, IndexError):
+                    act_hour = 12
+                weather = fetch_weather(lat, lon, date_str, act_hour)
 
-            weather = fetch_weather(lat, lon, date_str, act_hour)
-
-            # Splits — runs only
+            # Splits — runs only, not walks/cycling
             splits = []
-            if activity_id:
+            if activity_id and is_run:
                 try:
                     split_data = client.get_activity_splits(activity_id)
                     items = split_data if isinstance(split_data, list) else (
